@@ -6,7 +6,7 @@
 
 %% 2018.02.21 对于数据11，先对前1200个数据(第一句诗进行处理)
 clc
-clear all
+clear 
 close all
 
 data_raw_tmp = load('./data/11/data.txt')';
@@ -25,6 +25,7 @@ is_new_beginning = 0; % 通过压力值来判断是否是新的笔画
 new_beginning_counter = 0;
 % data_spreate % 分割的数据
 j_spreate = 0; % 代表分离的笔划
+j_spreate_debug = -1; % 用于调试
 i_count = 0;
 time_base = 0; % 因为目前时间戳不是从一开机就连续增加的，而是每次检测到压力开机后才开始计时，所以为了分析方便，做累加
 data_length = length(timestamp_raw);
@@ -33,7 +34,11 @@ for i = 1:data_length
     xy_state_cur = xy_state_raw(i);
     pressure_cur = pressure_raw(i);
     data_cur = data_raw(:, i);
-    if i == 145
+      
+    if data_cur(2) == 4452 && data_cur(3) == -7456
+        j_spreate_debug = j_spreate + 1
+        x_error = data_cur(2)
+        y_error = data_cur(3)
         test = 1;
     end
     
@@ -50,7 +55,7 @@ for i = 1:data_length
     end
     
     % 当压力值变为0，同时累积的数据大于0个，则存储
-    if pressure_cur == 0 && i_count > 0
+    if pressure_cur == 0 && i_count > 5
         j_spreate = j_spreate + 1; % 新的一个连划
         data_spreate{j_spreate} = data_spreate_tmp;
         time_pre = data_cur(1);
@@ -66,28 +71,41 @@ i_save = 0;
 j_data_new = 0; % 重构数据，剔除异常值
 % data_new; % 新的数据
 for i=1:j_spreate
-    if i == 4
+    if i == j_spreate_debug %219
         test = 1;
     end
     data_tmp = data_spreate{i};
     [t, data_length1] = size(data_tmp);
     is_first_data = true;
+    new_first_data_judege_counter = 0;
     for j = 1:data_length1
         time_cur = data_tmp(1, j);
         xy_cur = data_tmp(2:3, j);
-        if is_first_data
-            % 首次进入函数，需要初始化pre的值
-            time_pre = time_cur;
-            xy_pre = xy_cur;
-            is_first_data = false;
-            
+        if is_first_data            
             % 保存新连笔的第一个数据
-            j_data_new = j_data_new + 1;
-            % 初始第一个数据速度为0
-            data_new(:, j_data_new) = [time_cur, xy_cur(1), xy_cur(2), 0, 0, 1]';
+            % TODO 第一个数据可能是错的，所以作为初始数据的合理性要进行判断，初步策略是取5个，算平均的合理性
+            % 首次进入函数，需要初始化pre的值
+            new_first_data_judege_counter = new_first_data_judege_counter + 1;
+            if new_first_data_judege_counter <= 6
+                new_first_data_tmp(:, new_first_data_judege_counter) = [time_cur, xy_cur(1), xy_cur(2)]';
+            else
+                % 判断前5个数据哪些是合理的
+                [ new_first_data, ret_state ] = fun_judge_data( new_first_data_tmp );
+                if ret_state == 1
+                    [t, length1] = size(new_first_data);
+                    data_new(1:3, j_data_new+1:j_data_new + length1) = new_first_data;
+                    data_new(4, j_data_new+1) = 1;
+                    data_new(4, j_data_new+2:j_data_new + length1) = 0;
+                    
+                    time_pre = new_first_data(1, length1);
+                    xy_pre = new_first_data(2:3, length1);
+                    j_data_new = j_data_new + length1;
+                    is_first_data = false;
+                end
+            end
         else
             dt = time_cur - time_pre;
-            if dt > 0.2
+            if j == 14
                 test = 1;
             end
             dxy = xy_cur - xy_pre;
@@ -99,11 +117,11 @@ for i=1:j_spreate
                 v_normal = sqrt(v_xy(1)^2 + v_xy(2)^2); % 速度模值
                 % ---TODO---
                 % 书写速度的阈值，这个可以先这么简单处理，更合理是考虑历史速度，剔除突变
-                if v_normal < 1e5 
+                if v_normal < 1.2e5 
                     time_pre = time_cur;
                     j_data_new = j_data_new + 1;
                     % 剔除异常值后，所有有效数据都在data_new中
-                    data_new(:, j_data_new) = [time_cur, xy_cur(1), xy_cur(2), v_xy(1), v_xy(2), 0]';
+                    data_new(:, j_data_new) = [time_cur, xy_cur(1), xy_cur(2), 0]';
             
                     i_save = i_save + 1;
                     save_v_xy(:, i_save) = [time_cur, v_xy(1), v_xy(2)]';
@@ -124,21 +142,32 @@ end
 % data_new =[time xy*2 vxy*2 is_new_trace(是否是新的连笔)]
 % 直接用速度做插值
 [t, length_new] = size(data_new);
+i_save_origin = 0;
+i_save_insert = 0;
+data_restore_origin = []; % 原始图像识别出来的坐标
+data_restore_insert = []; % 插值的点
+
 i_save = 0;
 for i = 1:length_new
     time_cur = data_new(1, i);
     xy_cur = data_new(2:3, i);
-    Vxy_cur = data_new(4:5, i);
-    is_new_trace = data_new(6, i);
+    is_new_trace = data_new(4, i);
     if is_new_trace == 1
         time_pre = time_cur;
-        xy_pre = xy_cur;
-        Vxy_pre = Vxy_cur;      
+        xy_pre = xy_cur;   
         
         % 保存数据
         i_save = i_save + 1;
         data_restore(:, i_save) = [time_cur, xy_cur(1), xy_cur(2), 1]';
+        i_save_origin = i_save_origin + 1;
+        data_restore_origin(:, i_save_origin) = [time_cur, xy_cur(1), xy_cur(2), 1]';
     else
+        % 保存数据
+        i_save = i_save + 1;
+        data_restore(:, i_save) = [time_cur, xy_cur(1), xy_cur(2), 1]';
+        i_save_origin = i_save_origin + 1;
+        data_restore_origin(:, i_save_origin) = [time_cur, xy_cur(1), xy_cur(2), 1]';
+        
         dt = time_cur - time_pre;
         % 插值
         dt_insert = 1/800; % 400hz
@@ -149,10 +178,11 @@ for i = 1:length_new
             time_cur_new = time_pre + dt1;
             i_save = i_save + 1;
             data_restore(:, i_save) = [time_cur_new, xy_insert(1), xy_insert(2), 0]';
+            i_save_insert = i_save_insert + 1;
+            data_restore_insert(:, i_save_insert) = [time_cur_new, xy_insert(1), xy_insert(2), 0]';
         end
         time_pre = time_cur;
         xy_pre = xy_cur;
-        Vxy_pre = Vxy_cur; 
     end
 end
 
@@ -191,7 +221,16 @@ legend('new-xy');
 figure()
 hold on;
 grid on;
-plot(data_restore(2,:), data_restore(3,:), '.'); % xy-restore
+plot(data_restore_insert(2,:), data_restore_insert(3,:), '.r'); % xy-restore-insert
+plot(data_restore_origin(2,:), data_restore_origin(3,:), '.'); % xy-restore-origin
+% xlim([3000, 9000]);
+% ylim([-5000, -2000]);
+legend('xy-restore-insert', 'xy-restore-origin');
+
+figure()
+hold on;
+grid on;
+plot(data_restore(2,:), data_restore(3,:), '.'); % xy-restore-origin
 % xlim([3000, 9000]);
 % ylim([-5000, -2000]);
 legend('xy-restore');
