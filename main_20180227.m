@@ -1,8 +1,9 @@
 % XY 坐标在1200dpi图片上 单位是像素（可以根据实际像素进行缩小 手机截图是倍率是 数据xy/128 *6）
 % 时间 每笔的初始化时间为0 us ，可以认为第一个数据为开始值。
 % 
-% 数据格式：(最后)
+% 数据格式：(new)
 % 时间(us) xy坐标 压力状态(1/0:1代表有压力) 数据是否有效
+% 2018.02.25 对数据进行一次差分，然后中值滤波，再用积分还原
 
 %% 2018.02.21 对于数据11，先对前1200个数据(第一句诗进行处理)
 clc
@@ -10,71 +11,102 @@ clear
 close all
 
 data_raw_tmp = load('./data/11/data.txt')';
-data_raw = data_raw_tmp(:, 1:100);
-data_raw(1, :) = data_raw(1, :)/1e6;  %将us转换为s;
-data_raw(3, :) = -data_raw(3, :); % 为方便画图，图像的坐标系转换
+data_raw1 = data_raw_tmp(:, 1:end);
+data_raw1(1, :) = data_raw1(1, :)/1e6;  %将us转换为s;
+data_raw1(3, :) = -data_raw1(3, :); % 为方便画图，图像的坐标系转换
+%% 1.做数据分割
+% data_spreate % 分割的数据
+[data_raw, data_spreate, j_spreate_debug] = data_timestamp_trans(data_raw1);
 
 timestamp_raw = data_raw(1, :);  %s;
 xy_raw = data_raw( 2:3, :);
 pressure_raw = data_raw(4, :);
 xy_state_raw = data_raw(5, :); % 图像解码是否有输出数据
-
 is_new_beginning = 0; % 通过压力值来判断是否是新的笔画
-
-%% 1.做数据分割
-new_beginning_counter = 0;
-% data_spreate % 分割的数据
-j_spreate = 0; % 代表分离的笔划
-j_spreate_debug = -1; % 用于调试
-i_count = 0;
-time_base = 0; % 因为目前时间戳不是从一开机就连续增加的，而是每次检测到压力开机后才开始计时，所以为了分析方便，做累加
-data_length = length(timestamp_raw);
-time_pre = 0;
-for i = 1:data_length
-    xy_state_cur = xy_state_raw(i);
-    pressure_cur = pressure_raw(i);
-    data_cur = data_raw(:, i);
-      
-    if data_cur(2) == 4452 && data_cur(3) == -7456
-        j_spreate_debug = j_spreate + 1
-        x_error = data_cur(2)
-        y_error = data_cur(3)
-        test = 1;
-    end
-    
-    if xy_state_cur == 1 && pressure_cur == 1 % 只有当图像解算坐标值有效,并且有压力值时才记为有效数据
-        % 说明数据从无效重新变为有效(有可能是)
-        if i_count == 0
-            time_base = time_base + time_pre;
-            clear data_spreate_tmp;
-        end
-        i_count = i_count + 1; % 一个连划里面的点计数
-        data_spreate_tmp(:, i_count) = data_cur;
-        data_spreate_tmp(1, i_count) = data_spreate_tmp(1, i_count) + time_base; % 累加时间
-        
-    end
-    
-    % 当压力值变为0，同时累积的数据大于0个，则存储
-    if pressure_cur == 0 && i_count > 5
-        j_spreate = j_spreate + 1; % 新的一个连划
-        data_spreate{j_spreate} = data_spreate_tmp;
-        time_pre = data_cur(1);
-        i_count = 0;
-    end
-    
-
-end
 
 %% 根据速度剔除异常值，新的有效数据都在data_new中
 % 新数据data_new =[time xy*2 vxy*2 is_new_trace(是否是新的连笔)]
 i_save = 0;
 j_data_new = 0; % 重构数据，剔除异常值
+j_spreate_count = 0;
 % data_new; % 新的数据
+j_spreate = length(data_spreate);
 for i=1:j_spreate
     if i == j_spreate_debug %219
         test = 1;
     end
     data_tmp = data_spreate{i};
+     
+    %% 差分中值滤波步骤
+    is_filter_loop = true; % 是否循环剔除野值
+    loop_counter = 0;
+    data_filter = data_tmp(2:3, :);
+    while is_filter_loop
+        % 控制是否进行中值滤波
+        if loop_counter >= 1
+            break;
+        end
+        loop_counter = loop_counter + 1;
+        
+        % 1.中值滤波
+        data_filter(1,:) = medfilt1(data_filter(1,:), 3);
+        data_filter(2,:) = medfilt1(data_filter(2,:), 3);
+        % 2.差分中值滤波
+        % 3.积分恢复
+        % 4.循环执行1,2,3,直到没有野值
+        
+    end
+    
+    data_spreate_tmp = data_tmp;
+    data_spreate_tmp(2:3, :) = data_filter;
+    j_spreate_count = j_spreate_count + 1;
+    data_spreate_filter{j_spreate_count} = data_spreate_tmp;
+    
+    if 0
+        figure(1)
+        hold on;
+        subplot(1,2,1)
+        hold on;
+        grid on;
+        plot(data_tmp(2,:), data_tmp(3,:), '.b'); % xy
+        legend('xy-raw');
+
+        subplot(1,2,2)
+        hold on;
+        grid on;
+        plot(data_filter(1,:), data_filter(2,:), '.b'); % xy
+        legend('xy-filter');
+
+        % 测试
+        figure(2)
+        hold on;
+        subplot(2,2,1)
+        hold on;
+        grid on;
+        plot(data_tmp(1,:), data_tmp(2,:), '.b'); % x
+        legend('x');
+
+        subplot(2,2,3)
+        hold on;
+        grid on;
+        plot(data_tmp(1,:), data_tmp(3,:), '.b'); % y
+        legend('y');
+
+        subplot(2,2,2)
+        hold on;
+        grid on;
+        plot(data_tmp(1,:), data_filter(1,:), '.b'); % x
+        legend('x-filter');
+
+        subplot(2,2,4)
+        hold on;
+        grid on;
+        plot(data_tmp(1,:), data_filter(2,:), '.b'); % y
+        legend('y-filter');
+    end
+
+    %%
+    data_tmp = data_spreate_tmp; % 使用中值滤波的数据
     [t, data_length1] = size(data_tmp);
     is_first_data = true;
     new_first_data_judege_counter = 0;
@@ -85,24 +117,28 @@ for i=1:j_spreate
             % 保存新连笔的第一个数据
             % TODO 第一个数据可能是错的，所以作为初始数据的合理性要进行判断，初步策略是取5个，算平均的合理性
             % 首次进入函数，需要初始化pre的值
-            new_first_data_judege_counter = new_first_data_judege_counter + 1;
-            if new_first_data_judege_counter <= 6
-                new_first_data_tmp(:, new_first_data_judege_counter) = [time_cur, xy_cur(1), xy_cur(2)]';
-            else
-                % 判断前5个数据哪些是合理的
-                [ new_first_data, ret_state ] = fun_judge_data( new_first_data_tmp );
-                if ret_state == 1
-                    [t, length1] = size(new_first_data);
-                    data_new(1:3, j_data_new+1:j_data_new + length1) = new_first_data;
-                    data_new(4, j_data_new+1) = 1;
-                    data_new(4, j_data_new+2:j_data_new + length1) = 0;
-                    
-                    time_pre = new_first_data(1, length1);
-                    xy_pre = new_first_data(2:3, length1);
-                    j_data_new = j_data_new + length1;
-                    is_first_data = false;
-                end
-            end
+%             new_first_data_judege_counter = new_first_data_judege_counter + 1;
+%             if new_first_data_judege_counter <= 6
+%                 new_first_data_tmp(:, new_first_data_judege_counter) = [time_cur, xy_cur(1), xy_cur(2)]';
+%             else
+%                 % 判断前5个数据哪些是合理的
+%                 [ new_first_data, ret_state ] = fun_judge_data( new_first_data_tmp );
+%                 if ret_state == 1
+%                     [t, length1] = size(new_first_data);
+%                     data_new(1:3, j_data_new+1:j_data_new + length1) = new_first_data;
+%                     data_new(4, j_data_new+1) = 1;
+%                     data_new(4, j_data_new+2:j_data_new + length1) = 0;
+%                     
+%                     time_pre = new_first_data(1, length1);
+%                     xy_pre = new_first_data(2:3, length1);
+%                     j_data_new = j_data_new + length1;
+%                     is_first_data = false;
+%                 end
+%             end
+
+            time_pre = time_cur;
+            xy_pre = xy_cur;
+            is_first_data = false;
         else
             dt = time_cur - time_pre;
             if j == 14
@@ -117,7 +153,7 @@ for i=1:j_spreate
                 v_normal = sqrt(v_xy(1)^2 + v_xy(2)^2); % 速度模值
                 % ---TODO---
                 % 书写速度的阈值，这个可以先这么简单处理，更合理是考虑历史速度，剔除突变
-                if v_normal < 1.2e5 
+                if v_normal < 1e5 
                     time_pre = time_cur;
                     j_data_new = j_data_new + 1;
                     % 剔除异常值后，所有有效数据都在data_new中
@@ -132,7 +168,6 @@ for i=1:j_spreate
                 end
             else
                 time_pre = time_cur;
-%                 printf('error dt = %f\n', dt);
             end
         end
     end
@@ -170,16 +205,20 @@ for i = 1:length_new
         
         dt = time_cur - time_pre;
         % 插值
-        dt_insert = 1/800; % 400hz
-        for j = 1 : dt/dt_insert % 400hz
-            dt1 = j*dt_insert;
-            Vxy_cur = (xy_cur - xy_pre)/dt;
-            xy_insert = xy_pre + Vxy_cur*dt1;
-            time_cur_new = time_pre + dt1;
-            i_save = i_save + 1;
-            data_restore(:, i_save) = [time_cur_new, xy_insert(1), xy_insert(2), 0]';
-            i_save_insert = i_save_insert + 1;
-            data_restore_insert(:, i_save_insert) = [time_cur_new, xy_insert(1), xy_insert(2), 0]';
+        dxy = xy_cur - xy_pre;
+        dxy_nor = sqrt(sum(dxy.^2));
+        if dxy_nor < 250
+            dt_insert = 1/800; % 400hz
+            for j = 1 : dt/dt_insert % 400hz
+                dt1 = j*dt_insert;
+                Vxy_cur = dxy/dt;
+                xy_insert = xy_pre + Vxy_cur*dt1;
+                time_cur_new = time_pre + dt1;
+                i_save = i_save + 1;
+                data_restore(:, i_save) = [time_cur_new, xy_insert(1), xy_insert(2), 0]';
+                i_save_insert = i_save_insert + 1;
+                data_restore_insert(:, i_save_insert) = [time_cur_new, xy_insert(1), xy_insert(2), 0]';
+            end
         end
         time_pre = time_cur;
         xy_pre = xy_cur;
@@ -189,14 +228,26 @@ end
 
 
 %% 画图
-figure()
-hold on;
-grid on;
-plot(save_v_xy(1,:), save_v_xy(2,:), '.r'); % vx
-plot(save_v_xy(1,:), save_v_xy(3,:), '*'); % vy
-plot(save_v(1,:), save_v(2,:)); % v
-legend('vx', 'vy', 'v');
 
+% figure()
+% subplot(2,1,1)
+% grid on;
+% plot(data_raw(1,:), data_raw(2,:)); % x
+% legend('x');
+% 
+% subplot(2,1,2)
+% grid on;
+% plot(data_raw(1,:), data_raw(3,:)); % y
+% legend('y');
+% 
+% figure()
+% hold on;
+% grid on;
+% plot(save_v_xy(1,:), save_v_xy(2,:), '.r'); % vx
+% plot(save_v_xy(1,:), save_v_xy(3,:), '*'); % vy
+% plot(save_v(1,:), save_v(2,:)); % v
+% legend('vx', 'vy', 'v');
+% 
 figure()
 hold on;
 grid on;
