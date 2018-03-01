@@ -1,6 +1,6 @@
 % 1.时间戳转换（变成连续累加的时间戳）
 % 2.连续笔画数据分割
-function [data_out, data_spreate_out, j_spreate_debug] = data_timestamp_trans(data_in)
+function [data_out, data_spreate_out, j_spreate_debug] = data_timestamp_trans(data_in, is_raw_data_save)
     new_time_base = false;
     i_count = 0;
     i_count_s = 0;
@@ -21,7 +21,7 @@ function [data_out, data_spreate_out, j_spreate_debug] = data_timestamp_trans(da
         data_cur = data_in(:, i);
         
         % 调试的代码
-        if data_cur(2) == 4452 && data_cur(3) == -7456
+        if data_cur(2) == 6945 && data_cur(3) == -1504
             j_spreate_debug = j_spreate + 1;
             x_error = data_cur(2);
             y_error = data_cur(3);
@@ -52,6 +52,13 @@ function [data_out, data_spreate_out, j_spreate_debug] = data_timestamp_trans(da
             data_spreate_out{j_spreate} = data_spreate_tmp;
             time_pre = data_cur(1);
             new_time_base = true;
+            
+            %在data_out中添加状态为0的一行
+            if is_raw_data_save == 1
+                i_count = i_count + 1; % 连续计数
+                data_out(:, i_count) = data_cur;
+                data_out(end-1:end, i_count) = 0;
+            end
         end 
     end
 

@@ -7,7 +7,7 @@
 % 2018.02.28 重新思考处理逻辑：
 %  1.去除野值(用中值的策略，选取去掉野值的数据计算均值和方差，然后用这个做标准剔除野值；不能一直用中值滤波，因为笔画有些时候很稀疏)
 %  2.笔画分割，连接/插值
-% TODO： 目前初步剔除野值的效果还可以，按时得继续分析下为什么有些点被误删除，有些美删除
+% TODO： 目前初步剔除野值的效果还可以，按时得继续分析下为什么有些点被误删除，有些没删除
 
 %% 2018.02.21 对于数据11，先对前1200个数据(第一句诗进行处理)
 clc
@@ -20,7 +20,7 @@ data_raw1(1, :) = data_raw1(1, :)/1e6;  %将us转换为s;
 data_raw1(3, :) = -data_raw1(3, :); % 为方便画图，图像的坐标系转换
 %% 1.做数据分割
 % data_spreate % 分割的数据
-[data_raw, data_spreate, j_spreate_debug] = data_timestamp_trans(data_raw1);
+[data_raw, data_spreate, j_spreate_debug] = data_timestamp_trans(data_raw1, 0);
 
 timestamp_raw = data_raw(1, :);  %s;
 xy_raw = data_raw( 2:3, :);
@@ -36,13 +36,13 @@ j_spreate_count = 0;
 % data_new; % 新的数据
 j_spreate = length(data_spreate);
 for i_loop=1:j_spreate
-    if i_loop == 54 %219
+    data_tmp = data_spreate{i_loop};
+    if i_loop == j_spreate_debug
         test = 1;
     end
-    data_tmp = data_spreate{i_loop};
          
     [data_filter, ret_state] = outliter_delete( data_tmp );
-    if ret_state == 1
+    if ret_state >= 1
         data_spreate_tmp = data_filter;
         j_spreate_count = j_spreate_count + 1;
         data_spreate_filter{j_spreate_count} = data_spreate_tmp;
@@ -99,9 +99,10 @@ for i_loop=1:j_spreate
             time_cur = data_tmp(1, j);
             xy_cur = data_tmp(2:3, j);
             if is_first_data            
-
                 time_pre = time_cur;
                 xy_pre = xy_cur;
+                j_data_new = j_data_new + 1;
+                data_new(:, j_data_new) = [time_cur, xy_cur(1), xy_cur(2), 0]';
                 is_first_data = false;
             else
                 dt = time_cur - time_pre;
@@ -194,16 +195,16 @@ end
 
 %% 画图
 
-% figure()
-% subplot(2,1,1)
-% grid on;
-% plot(data_raw(1,:), data_raw(2,:)); % x
-% legend('x');
-% 
-% subplot(2,1,2)
-% grid on;
-% plot(data_raw(1,:), data_raw(3,:)); % y
-% legend('y');
+figure()
+subplot(2,1,1)
+grid on;
+plot(data_raw(1,:), data_raw(2,:)); % x
+legend('x');
+
+subplot(2,1,2)
+grid on;
+plot(data_raw(1,:), data_raw(3,:)); % y
+legend('y');
 % 
 % figure()
 % hold on;
